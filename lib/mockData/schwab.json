@@ -1,0 +1,57 @@
+[
+  {
+    "symbol": "AAPL",
+    "name": "Apple Inc.",
+    "quantity": 10,
+    "price": 180.25,
+    "marketValue": 1802.5,
+    "costBasis": 1500.0,
+    "gainLoss": 302.5,
+    "gainLossPct": 20.16,
+    "source": "Schwab"
+  },
+  {
+    "symbol": "MSFT",
+    "name": "Microsoft Corp.",
+    "quantity": 5,
+    "price": 320.10,
+    "marketValue": 1600.5,
+    "costBasis": 1550.0,
+    "gainLoss": 50.5,
+    "gainLossPct": 3.26,
+    "source": "Schwab"
+  },
+  {
+    "symbol": "GOOGL",
+    "name": "Alphabet Inc.",
+    "quantity": 8,
+    "price": 140.50,
+    "marketValue": 1124.0,
+    "costBasis": 1200.0,
+    "gainLoss": -76.0,
+    "gainLossPct": -6.33,
+    "source": "Schwab"
+  },
+  {
+    "symbol": "TSLA",
+    "name": "Tesla Inc.",
+    "quantity": 12,
+    "price": 245.75,
+    "marketValue": 2949.0,
+    "costBasis": 2800.0,
+    "gainLoss": 149.0,
+    "gainLossPct": 5.32,
+    "source": "Schwab"
+  },
+  {
+    "symbol": "NVDA",
+    "name": "NVIDIA Corp.",
+    "quantity": 15,
+    "price": 495.20,
+    "marketValue": 7428.0,
+    "costBasis": 6000.0,
+    "gainLoss": 1428.0,
+    "gainLossPct": 23.8,
+    "source": "Schwab"
+  }
+]

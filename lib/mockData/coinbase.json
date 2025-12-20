@@ -1,0 +1,46 @@
+[
+  {
+    "symbol": "BTC",
+    "name": "Bitcoin",
+    "quantity": 0.15,
+    "price": 68000,
+    "marketValue": 10200,
+    "costBasis": 9000,
+    "gainLoss": 1200,
+    "gainLossPct": 13.33,
+    "source": "Coinbase"
+  },
+  {
+    "symbol": "ETH",
+    "name": "Ethereum",
+    "quantity": 2,
+    "price": 2400,
+    "marketValue": 4800,
+    "costBasis": 4000,
+    "gainLoss": 800,
+    "gainLossPct": 20.0,
+    "source": "Coinbase"
+  },
+  {
+    "symbol": "SOL",
+    "name": "Solana",
+    "quantity": 25,
+    "price": 145.30,
+    "marketValue": 3632.5,
+    "costBasis": 3500.0,
+    "gainLoss": 132.5,
+    "gainLossPct": 3.79,
+    "source": "Coinbase"
+  },
+  {
+    "symbol": "ADA",
+    "name": "Cardano",
+    "quantity": 1000,
+    "price": 0.58,
+    "marketValue": 580.0,
+    "costBasis": 650.0,
+    "gainLoss": -70.0,
+    "gainLossPct": -10.77,
+    "source": "Coinbase"
+  }
+]
