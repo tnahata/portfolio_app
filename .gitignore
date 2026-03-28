@@ -9,6 +9,9 @@
 # testing
 /coverage
 
+# virtual environment
+.venv/
+
 # next.js
 /.next/
 /out/
@@ -38,6 +41,10 @@ cdp_api_key.json
 *_api_key.json
 *.key
 *.secret
+scripts/google-service-account.json
+
+# Sync logs
+logs/
 
 # vercel
 .vercel
@@ -92,6 +99,8 @@ pnpm-debug.log*
 tmp/
 temp/
 *.tmp
+tokens.json
+tempCodeRunnerFile*
 
 # Lock files (optional - some teams commit these, some don't)
 # Uncomment if you want to ignore lock files:

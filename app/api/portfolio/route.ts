@@ -63,12 +63,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       data: positions,
       sources: sources.join(", "),
       warnings: errors.length > 0 ? errors : undefined,
+      timestamp: new Date().toISOString(), // Add timestamp to verify freshness
     });
+
+    // Explicitly disable caching
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+    response.headers.set('Surrogate-Control', 'no-store');
+
+    return response;
   } catch (error) {
     console.error("Portfolio API error:", error);
     return NextResponse.json(

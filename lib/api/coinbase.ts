@@ -22,11 +22,30 @@ class CoinbaseAPIClient {
   async getPrice(currency: string): Promise<number> {
     try {
       // Use the public endpoint which doesn't require auth
-      const response = await fetch(`https://api.coinbase.com/v2/prices/${currency}-USD/spot`);
+      // Add cache-busting and no-cache headers to ensure fresh data
+      const timestamp = Date.now();
+      const url = `https://api.coinbase.com/v2/prices/${currency}-USD/spot?t=${timestamp}`;
+      console.log(`[${new Date().toISOString()}] Fetching fresh price for ${currency} from ${url}`);
+      
+      const response = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Price API returned ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
-      return parseFloat(data.data.amount);
+      const price = parseFloat(data.data.amount);
+      console.log(`[${new Date().toISOString()}] Fetched price for ${currency}: $${price}`);
+      return price;
     } catch (error) {
-      console.error(`Failed to fetch price for ${currency}:`, error);
+      console.error(`[${new Date().toISOString()}] Failed to fetch price for ${currency}:`, error);
       return 0;
     }
   }
@@ -103,11 +122,12 @@ class CoinbaseAPIClient {
   }
 
   async getPositions(): Promise<Position[]> {
-    console.log("Fetching Coinbase Advanced Trade positions...");
+    const fetchStartTime = new Date().toISOString();
+    console.log(`[${fetchStartTime}] Fetching Coinbase Advanced Trade positions...`);
 
     try {
       // List all accounts using the Advanced Trade API
-      console.log("Listing accounts...");
+      console.log(`[${new Date().toISOString()}] Listing accounts...`);
       const accountsResponse = await this.client.rest.account.listAccounts();
 
       if (!accountsResponse.data || accountsResponse.data.length === 0) {

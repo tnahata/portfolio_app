@@ -43,9 +43,10 @@ export function usePortfolioData() {
   } = useQuery({
     queryKey: ["portfolio"],
     queryFn: fetchPortfolioData,
-    staleTime: 30 * 1000, // Data is fresh for 30 seconds (reduced from 5 minutes)
-    refetchInterval: 60 * 1000, // Auto-refetch every 1 minute (reduced from 5 minutes)
-    refetchOnWindowFocus: true, // Refetch when user returns to the tab
+    staleTime: 5 * 60 * 1000, // Data is fresh for 5 minutes
+    refetchInterval: 5 * 60 * 1000, // Auto-refetch every 5 minutes
+    refetchOnMount: true, // Always refetch when component mounts
+    refetchOnWindowFocus: true, // Refetch when window regains focus
   });
 
   // Filter positions based on source

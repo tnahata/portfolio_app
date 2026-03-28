@@ -50,7 +50,7 @@ export default function Home() {
     <main className="container mx-auto px-4 py-8">
       <div className="space-y-6">
         {/* Header with Refresh Button */}
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center sticky top-0 z-10 bg-background py-3 -mt-3 border-b">
           <div className="flex justify-center flex-1">
             <SourceSelector value={sourceFilter} onChange={setSourceFilter} />
           </div>

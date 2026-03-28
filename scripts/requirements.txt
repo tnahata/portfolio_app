@@ -1,0 +1,8 @@
+schwabdev
+keyring
+PyJWT
+cryptography
+requests
+python-dotenv
+google-api-python-client
+google-auth
