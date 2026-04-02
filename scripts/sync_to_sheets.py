@@ -279,12 +279,18 @@ def write_to_sheet(positions: list[dict]) -> None:
 
 	headers = [
 		"Last Updated", "Source", "Symbol", "Name",
-		"Quantity", "Price ($)", "Market Value ($)",
-		"Cost Basis ($)", "Gain/Loss ($)", "Gain/Loss (%)",
+		"Quantity", "Price ($)", "Price (₹)",
+		"Present Value ($)", "Present Value (₹)",
+		"Avg Buy Price ($)", "Avg Buy Price (₹)",
+		"Gain/Loss ($)", "Gain/Loss (₹)",
+		"Gain/Loss (%)",
 	]
+
+	fx = 'GOOGLEFINANCE("CURRENCY:USDINR")'
 
 	rows = [headers]
 	for i, pos in enumerate(positions):
+		row_num = i + 2  # 1-indexed, header is row 1
 		rows.append([
 			now_str if i == 0 else "",
 			pos["source"],
@@ -292,11 +298,30 @@ def write_to_sheet(positions: list[dict]) -> None:
 			pos["name"],
 			round(pos["quantity"], 6),
 			round(pos["price"], 4),
+			f"=F{row_num}*{fx}",
 			round(pos["market_value"], 2),
+			f"=H{row_num}*{fx}",
 			round(pos["cost_basis"], 2),
+			f"=J{row_num}*{fx}",
 			round(pos["gain_loss"], 2),
+			f"=L{row_num}*{fx}",
 			round(pos["gain_loss_pct"], 2),
 		])
+
+	# Total row
+	last_data_row = len(positions) + 1  # header is row 1
+	total_row_num = last_data_row + 1
+	rows.append([
+		"", "", "", "Total", "",
+		"", "",
+		f"=SUM(H2:H{last_data_row})",
+		f"=SUM(I2:I{last_data_row})",
+		f"=SUM(J2:J{last_data_row})",
+		f"=SUM(K2:K{last_data_row})",
+		f"=SUM(L2:L{last_data_row})",
+		f"=SUM(M2:M{last_data_row})",
+		f'=IF(J{total_row_num}=0,0,L{total_row_num}/J{total_row_num}*100)',
+	])
 
 	sheet.values().clear(spreadsheetId=SHEET_ID, range="Sheet1").execute()
 	sheet.values().update(
@@ -306,7 +331,81 @@ def write_to_sheet(positions: list[dict]) -> None:
 		body={"values": rows},
 	).execute()
 
-	print(f"✓ Wrote {len(positions)} positions to Google Sheet at {now_str}")
+	# Formatting requests
+	num_cols = len(headers)
+	total_rows = total_row_num  # includes header + data + total row
+	total_row_idx = total_row_num - 1  # 0-indexed row for the total row
+
+	border_style = {"style": "SOLID", "colorStyle": {"rgbColor": {"red": 0.8, "green": 0.8, "blue": 0.8}}}
+
+	format_requests = [
+		# Bold header row
+		{"repeatCell": {
+			"range": {"sheetId": 0, "startRowIndex": 0, "endRowIndex": 1,
+					  "startColumnIndex": 0, "endColumnIndex": num_cols},
+			"cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+			"fields": "userEnteredFormat.textFormat.bold",
+		}},
+		# Bold total row
+		{"repeatCell": {
+			"range": {"sheetId": 0, "startRowIndex": total_row_idx, "endRowIndex": total_row_idx + 1,
+					  "startColumnIndex": 0, "endColumnIndex": num_cols},
+			"cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+			"fields": "userEnteredFormat.textFormat.bold",
+		}},
+		# Borders on entire table
+		{"updateBorders": {
+			"range": {"sheetId": 0, "startRowIndex": 0, "endRowIndex": total_rows,
+					  "startColumnIndex": 0, "endColumnIndex": num_cols},
+			"top": border_style, "bottom": border_style,
+			"left": border_style, "right": border_style,
+			"innerHorizontal": border_style, "innerVertical": border_style,
+		}},
+		# Auto-resize columns to fit content
+		{"autoResizeDimensions": {
+			"dimensions": {"sheetId": 0, "dimension": "COLUMNS",
+						   "startIndex": 0, "endIndex": num_cols},
+		}},
+	]
+
+	# Conditional formatting: green for profit, red for loss on Gain/Loss columns
+	# Columns: L=11, M=12, N=13 (0-indexed)
+	for col_idx in [11, 12, 13]:
+		# Green for positive values
+		format_requests.append({
+			"addConditionalFormatRule": {
+				"rule": {
+					"ranges": [{"sheetId": 0, "startRowIndex": 1, "endRowIndex": total_rows,
+								"startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}],
+					"booleanRule": {
+						"condition": {"type": "NUMBER_GREATER", "values": [{"userEnteredValue": "0"}]},
+						"format": {"textFormat": {"foregroundColorStyle": {"rgbColor": {"red": 0.13, "green": 0.55, "blue": 0.13}}}},
+					},
+				},
+				"index": 0,
+			}
+		})
+		# Red for negative values
+		format_requests.append({
+			"addConditionalFormatRule": {
+				"rule": {
+					"ranges": [{"sheetId": 0, "startRowIndex": 1, "endRowIndex": total_rows,
+								"startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}],
+					"booleanRule": {
+						"condition": {"type": "NUMBER_LESS", "values": [{"userEnteredValue": "0"}]},
+						"format": {"textFormat": {"foregroundColorStyle": {"rgbColor": {"red": 0.8, "green": 0.13, "blue": 0.13}}}},
+					},
+				},
+				"index": 0,
+			}
+		})
+
+	sheet.batchUpdate(
+		spreadsheetId=SHEET_ID,
+		body={"requests": format_requests},
+	).execute()
+
+	print(f"✓ Wrote {len(positions)} positions + total row to Google Sheet at {now_str}")
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
