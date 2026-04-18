@@ -281,7 +281,7 @@ def write_to_sheet(positions: list[dict]) -> None:
 		"Last Updated", "Source", "Symbol", "Name",
 		"Quantity", "Price ($)", "Price (₹)",
 		"Present Value ($)", "Present Value (₹)",
-		"Avg Buy Price ($)", "Avg Buy Price (₹)",
+		"Cost Basis ($)", "Cost Basis (₹)",
 		"Gain/Loss ($)", "Gain/Loss (₹)",
 		"Gain/Loss (%)",
 	]
