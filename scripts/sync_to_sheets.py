@@ -17,7 +17,7 @@ import os
 import secrets
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -44,6 +44,7 @@ SERVICE_ACCOUNT_FILE = Path(__file__).parent / "google-service-account.json"
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 FIAT_CURRENCIES = {"USD", "EUR", "GBP", "CAD", "USDC", "USDT"}
+SCHWAB_TX_START = date(2020, 1, 1)  # fetch capital transactions from this date forward
 CRYPTO_NAMES = {
 	"BTC": "Bitcoin",
 	"ETH": "Ethereum",
@@ -138,6 +139,78 @@ def fetch_schwab_positions() -> list[dict]:
 			})
 
 	return positions
+
+
+def _schwab_year_windows():
+	"""Yield (start_dt, end_dt) UTC pairs from SCHWAB_TX_START to today in 1-year windows.
+
+	Schwab enforces a 1-year maximum date range per transactions request.
+	"""
+	today = datetime.now(timezone.utc).date()
+	start = SCHWAB_TX_START
+	while start <= today:
+		raw_end = date(start.year + 1, start.month, start.day) - timedelta(days=1)
+		end = min(raw_end, today)
+		if start <= end:
+			yield (
+				datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
+				datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc),
+			)
+		start = date(start.year + 1, start.month, start.day)
+
+
+def fetch_schwab_account_hashes(token: str) -> list[str]:
+	"""Return all account hashValues needed for the transactions endpoint."""
+	resp = requests.get(
+		"https://api.schwabapi.com/trader/v1/accounts/accountNumbers",
+		headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+		timeout=30,
+	)
+	resp.raise_for_status()
+	return [item["hashValue"] for item in resp.json()]
+
+
+def fetch_schwab_transactions(token: str) -> list[dict]:
+	"""Return capital transactions from all Schwab accounts since SCHWAB_TX_START.
+
+	Each entry: {"date": datetime (UTC-aware), "amount": float}
+	Positive amount = capital deployed (buy). Negative = capital returned (sell).
+	"""
+	hashes = fetch_schwab_account_hashes(token)
+	transactions = []
+
+	for account_hash in hashes:
+		for start_dt, end_dt in _schwab_year_windows():
+			resp = requests.get(
+				f"https://api.schwabapi.com/trader/v1/accounts/{account_hash}/transactions",
+				headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+				params={
+					"types": "TRADE",
+					"startDate": start_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+					"endDate": end_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+				},
+				timeout=30,
+			)
+			if not resp.ok:
+				print(f"  Warning: Schwab transactions {account_hash[:8]}… {start_dt.year} → {resp.status_code}, skipping window")
+				continue
+
+			for tx in resp.json():
+				raw_date = tx.get("tradeDate")
+				net = tx.get("netAmount")
+				if not raw_date or net is None:
+					continue
+				try:
+					trade_dt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+				except ValueError:
+					continue
+				# netAmount < 0 = cash left account (buy) → flip to positive capital deployed
+				# netAmount > 0 = cash entered account (sell) → negative (capital returned)
+				amount = -float(net)
+				if amount != 0:
+					transactions.append({"date": trade_dt, "amount": amount})
+
+	return transactions
 
 
 # ─── Coinbase ──────────────────────────────────────────────────────────────────
@@ -256,9 +329,94 @@ def fetch_coinbase_positions() -> list[dict]:
 	return positions
 
 
+def fetch_coinbase_capital_transactions() -> list[dict]:
+	"""Return all buy/receive (positive) and sell/send (negative) Coinbase transactions.
+
+	Each entry: {"date": datetime (UTC-aware), "amount": float} in USD.
+	Follows cursor pagination to retrieve full history.
+	"""
+	api_key = os.getenv("COINBASE_API_KEY", "")
+	api_secret = os.getenv("COINBASE_API_SECRET", "")
+	if not api_key or not api_secret:
+		raise RuntimeError("COINBASE_API_KEY / COINBASE_API_SECRET not set in .env.local")
+
+	# Get all non-fiat non-zero accounts
+	list_path = "/api/v3/brokerage/accounts"
+	list_token = make_coinbase_jwt(api_key, api_secret, "GET", list_path)
+	resp = requests.get(
+		f"https://api.coinbase.com{list_path}",
+		headers={"Authorization": f"Bearer {list_token}"},
+		timeout=30,
+	)
+	resp.raise_for_status()
+
+	account_ids = [
+		account["uuid"]
+		for account in resp.json().get("accounts", [])
+		if float(account.get("available_balance", {}).get("value", 0)) > 0.00000001
+		and account.get("currency", "") not in FIAT_CURRENCIES
+	]
+
+	transactions = []
+	for account_id in account_ids:
+		path: str | None = f"/v2/accounts/{account_id}/transactions"
+		while path:
+			base_path = path.split("?")[0]  # JWT must sign base path, not query string
+			token = make_coinbase_jwt(api_key, api_secret, "GET", base_path)
+			resp = requests.get(
+				f"https://api.coinbase.com{path}",
+				headers={"Authorization": f"Bearer {token}"},
+				timeout=30,
+			)
+			if not resp.ok:
+				print(f"  Warning: Coinbase transactions for {account_id[:8]}… → {resp.status_code}, skipping")
+				break
+
+			data = resp.json()
+			for tx in data.get("data", []):
+				raw_date = tx.get("created_at", "")
+				native = tx.get("native_amount", {}).get("amount", "0")
+				tx_type = str(tx.get("type", "")).lower()
+				try:
+					tx_dt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+					usd = float(native)
+				except (ValueError, TypeError):
+					continue
+
+				if usd == 0:
+					continue
+
+				if "buy" in tx_type or "receive" in tx_type:
+					transactions.append({"date": tx_dt, "amount": abs(usd)})
+				elif "sell" in tx_type or "send" in tx_type:
+					transactions.append({"date": tx_dt, "amount": -abs(usd)})
+
+			path = data.get("pagination", {}).get("next_uri")
+
+	return transactions
+
+
+# ─── Cost of Capital ───────────────────────────────────────────────────────────
+
+def calculate_cost_of_capital(transactions: list[dict], rate: float = 0.12) -> float:
+	"""Compute simple interest on net invested capital across all transactions.
+
+	For each transaction, interest = amount * rate * (days_held / 365).
+	Positive amount (buy) accrues positive interest; negative (sell) reduces it.
+	"""
+	now = datetime.now(timezone.utc)
+	total = 0.0
+	for tx in transactions:
+		days = (now - tx["date"]).days
+		if days < 0:
+			continue  # skip any future-dated transactions
+		total += tx["amount"] * rate * (days / 365)
+	return total
+
+
 # ─── Google Sheets ─────────────────────────────────────────────────────────────
 
-def write_to_sheet(positions: list[dict]) -> None:
+def write_to_sheet(positions: list[dict], cost_of_capital_usd: float) -> None:
 	if not SERVICE_ACCOUNT_FILE.exists():
 		raise RuntimeError(
 			f"Service account file not found: {SERVICE_ACCOUNT_FILE}\n"
@@ -323,6 +481,16 @@ def write_to_sheet(positions: list[dict]) -> None:
 		f'=IF(J{total_row_num}=0,0,L{total_row_num}/J{total_row_num}*100)',
 	])
 
+	# Cost of Capital row
+	coc_row = total_row_num + 1
+	rows.append([
+		"", "", "", "Cost of Capital (12% p.a.)", "",
+		"", "",
+		round(cost_of_capital_usd, 2),  # H: USD
+		f"=H{coc_row}*{fx}",            # I: INR via GOOGLEFINANCE
+		"", "", "", "", "",
+	])
+
 	sheet.values().clear(spreadsheetId=SHEET_ID, range="Sheet1").execute()
 	sheet.values().update(
 		spreadsheetId=SHEET_ID,
@@ -335,6 +503,7 @@ def write_to_sheet(positions: list[dict]) -> None:
 	num_cols = len(headers)
 	total_rows = total_row_num  # includes header + data + total row
 	total_row_idx = total_row_num - 1  # 0-indexed row for the total row
+	coc_row_idx = coc_row - 1          # 0-indexed row for the CoC row
 
 	border_style = {"style": "SOLID", "colorStyle": {"rgbColor": {"red": 0.8, "green": 0.8, "blue": 0.8}}}
 
@@ -353,9 +522,16 @@ def write_to_sheet(positions: list[dict]) -> None:
 			"cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
 			"fields": "userEnteredFormat.textFormat.bold",
 		}},
-		# Borders on entire table
+		# Bold CoC row
+		{"repeatCell": {
+			"range": {"sheetId": 0, "startRowIndex": coc_row_idx, "endRowIndex": coc_row_idx + 1,
+					  "startColumnIndex": 0, "endColumnIndex": num_cols},
+			"cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+			"fields": "userEnteredFormat.textFormat.bold",
+		}},
+		# Borders on entire table (including CoC row)
 		{"updateBorders": {
-			"range": {"sheetId": 0, "startRowIndex": 0, "endRowIndex": total_rows,
+			"range": {"sheetId": 0, "startRowIndex": 0, "endRowIndex": total_rows + 1,
 					  "startColumnIndex": 0, "endColumnIndex": num_cols},
 			"top": border_style, "bottom": border_style,
 			"left": border_style, "right": border_style,
@@ -405,7 +581,7 @@ def write_to_sheet(positions: list[dict]) -> None:
 		body={"requests": format_requests},
 	).execute()
 
-	print(f"✓ Wrote {len(positions)} positions + total row to Google Sheet at {now_str}")
+	print(f"✓ Wrote {len(positions)} positions + total row + CoC row to Google Sheet at {now_str}")
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
@@ -421,8 +597,30 @@ def main() -> None:
 	coinbase_positions = fetch_coinbase_positions()
 	print(f"  → {len(coinbase_positions)} positions")
 
+	# Fetch transactions for cost-of-capital calculation
+	token = get_schwab_access_token()  # cheap cache hit after positions fetch
+
+	print("Fetching Schwab transactions for cost of capital...")
+	try:
+		schwab_txs = fetch_schwab_transactions(token)
+		print(f"  → {len(schwab_txs)} Schwab capital transactions")
+	except Exception as e:
+		print(f"  Warning: Schwab transactions failed ({e}); CoC excludes Schwab.")
+		schwab_txs = []
+
+	print("Fetching Coinbase transactions for cost of capital...")
+	try:
+		coinbase_txs = fetch_coinbase_capital_transactions()
+		print(f"  → {len(coinbase_txs)} Coinbase capital transactions")
+	except Exception as e:
+		print(f"  Warning: Coinbase transactions failed ({e}); CoC excludes Coinbase.")
+		coinbase_txs = []
+
+	cost_of_capital_usd = calculate_cost_of_capital(schwab_txs + coinbase_txs)
+	print(f"  → Cost of capital: ${cost_of_capital_usd:,.2f} USD")
+
 	all_positions = schwab_positions + coinbase_positions
-	write_to_sheet(all_positions)
+	write_to_sheet(all_positions, cost_of_capital_usd)
 
 	print(f"[{datetime.now().isoformat()}] Done. {len(all_positions)} total positions synced.")
 
